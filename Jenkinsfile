@@ -27,17 +27,7 @@ def net_config = [
 def IR_VIRSH_IMAGE = img_list[osp_rhel_list[params.release]]
 def OS_REL = osp_rhel_list[params.release]
 def IR_NET_CONFIG = net_config[params.server]
-def stagelst='baremetal,undercloud,overcloud,update-fix,update-undercloud,update-overcloud'
-def excludelst=[]
-def excludestr="${params.exclude}"
-for (i in excludestr.split(',')){
-  for (j in stagelst.split(',')){
-  if ( j.matches(i) ){
-    excludelst.add(j)
-  
-  }
- }
-}
+
 pipeline {
     agent {
         node {
@@ -52,7 +42,6 @@ pipeline {
         choice(name: 'server', choices: ['rhos-nfv-10.lab.eng.rdu2.redhat.com', 'dell-r640-oss-13.lab.eng.brq.redhat.com'], description: 'Pick something')
         choice(name: 'release', choices: ['16.1', '16', '13'], description: 'Pick something')
         string(name: 'build', defaultValue: 'GA', description: 'passed_phase2,passed_phase1,GA')
-        string(name: 'beaker_user', defaultValue: 'ysubrama', description: 'Beaker username')
         choice(name: 'deployment', choices: ['virtual', 'hybrid'], description: 'Pick something')
         string(name: 'instack_git', defaultValue: 'https://github.com/yogananth-subramanian/cluster-mgt.git', description: 'git repo hosting instackenv.json file')
         string(name: 'instack_path', defaultValue: 'templates/instack/dell-r640-oss-13-nodes.json', description: 'path to instackenv.json in above repo')
@@ -60,49 +49,9 @@ pipeline {
         string(name: 'temp_path', defaultValue: 'osp16_ref', description: 'path to THT templates in above repo')
         string(name: 'under_conf', defaultValue: 'osp16_ref/undercloud_hybrid.conf', description: 'path to undercloud.conf file in above THT template repo')
         string(name: 'overcloud_script', defaultValue: 'overcloud_deploy_regular.sh', description: 'path to overcloud_script in above THT template repo')
-        string(name: 'build_update', defaultValue: 'passed_phase2', description: 'passed_phase2,passed_phase1')
-        string(name: 'exclude', defaultValue: '.*', description: 'steps to exlude, takes on comma separated values such as baremetal,undercloud,overcloud,update-fix,update-undercloud,update-overcloud')
     }
     stages {
-        stage('Install Baremetal') {
-            when {
-                expression { !('baremetal' in excludelst)  }
-            }
-            environment {
-                SERVICE_CREDS = credentials("${params.beaker_user}")
-            }
-            steps {
-                echo 'Building'
-                echo 'Starting'
-                  withCredentials([usernamePassword(credentialsId: "${params.beaker_user}", passwordVariable: 'beakerpass', usernameVariable: 'beakerusr')]) {
-                        sh '''
-                        git clone https://github.com/redhat-openstack/infrared.git;cd infrared/;virtualenv .venv;echo "export IR_HOME=`pwd`" >> .venv/bin/activate && source .venv/bin/activate; pip install -U pip;pip install .;infrared plugin add all
-                        ir beaker --url='https://beaker.engineering.redhat.com' --beaker-user='ysubrama' --beaker-password="$beakerpass" --host-address="$server" --image='rhel-7.8'  --host-pubkey '/root/.ssh/id_rsa.pub' --host-privkey '/root//.ssh/id_rsa' --web-service 'rest' --host-password="$beakerpass"  --host-user='root'  --release='True'
-                        ir beaker --url='https://beaker.engineering.redhat.com' --beaker-user='ysubrama' --beaker-password="$beakerpass" --host-address="$server" --image='rhel-7.8'  --host-pubkey '/root/.ssh/id_rsa.pub' --host-privkey '/root//.ssh/id_rsa' --web-service 'rest' --host-password="$beakerpass"  --host-user='root'
-                        '''
-                }
-                echo 'Finish'
-            }
-        }
-        stage('Configure Hypervisor') {
-            when {
-                expression { !('baremetal' in excludelst)  }
-            }
-            steps {
-                echo 'Building'
-                sh '''
-                ssh  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${server}  'yum install -y git python3 libselinux-python3 python-virtualenv libselinux-python'
-                keygen='yes|ssh-keygen -t rsa -q -f "$HOME/.ssh/id_rsa" -N ""; cat $HOME/.ssh/id_rsa.pub >> $HOME/.ssh/authorized_keys '
-                ssh  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${server} $keygen
-                ssh  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${server} 'git clone https://github.com/redhat-openstack/infrared.git;cd infrared/;virtualenv .venv;echo "export IR_HOME=`pwd`" >> .venv/bin/activate && source .venv/bin/activate; pip install -U pip;pip install .;infrared plugin add all'
-                '''
-                echo 'Finish'
-            }
-        }
         stage('Setup Topology') {
-            when {
-                expression { !('undercloud' in excludelst)  }
-            }
             environment {
                 IR_VIRSH_IMAGE = "${IR_VIRSH_IMAGE}"
                 IR_NET_CONFIG = "${IR_NET_CONFIG}"
@@ -155,9 +104,6 @@ pipeline {
             }
         }
         stage('Setup Undercloud') {
-            when {
-                expression { !('undercloud' in excludelst)  }
-            }
             steps {
                 echo 'Testing'
                  sh '''
@@ -174,9 +120,6 @@ pipeline {
             }
         }
         stage('Introspect Overcloud nodes') {
-            when {
-                expression { !('overcloud' in excludelst)  }
-            }
             steps {
                 echo 'Testing'
                  sh '''
@@ -216,9 +159,6 @@ pipeline {
             }
         }
         stage('Intall Overcloud') {
-            when {
-                expression { !('overcloud' in excludelst)  }
-            }
             steps {
                 echo 'Testing'
                  sh '''
@@ -257,125 +197,5 @@ pipeline {
                  '''
             }
         }
-        stage('update fix') {
-            when {
-                expression { !('update-fix' in excludelst)  }
-            }
-            steps {
-                echo 'Testing'
-                 sh '''
-                 ir_cli="infrared plugin remove tripleo-upgrade;infrared plugin add --revision stable/train tripleo-upgrade;mkdir -p /root/infrared/plugins/tripleo-upgrade/infrared_plugin/roles/tripleo-upgrade;find /root/infrared/plugins/tripleo-upgrade -maxdepth 1 -mindepth 1 -not -name infrared_plugin -exec mv '{}' /root/infrared/plugins/tripleo-upgrade/infrared_plugin/roles/tripleo-upgrade \\; "
-                 UN_SETUP="cd infrared/;source .venv/bin/activate;$ir_cli"
-                 echo ${UN_SETUP}
-                 ssh  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${server}  ${UN_SETUP}
-                 '''
-            }
-        }
-        stage('Update repo and containers') {
-            when {
-                expression { !('update-undercloud' in excludelst)  }
-            }
-            environment {
-                OS_REL = "${OS_REL}"
-            }
-            steps {
-                echo 'Testing'
-                 sh '''
-                 ir_cli="infrared tripleo-undercloud --update-undercloud yes --version ${release} --build ${build_update} --ansible-args='tags=upgrade_repos,undercloud_containers'  --osrelease ${OS_REL} "
-                 UN_SETUP="cd infrared/;source .venv/bin/activate;$ir_cli"
-                 echo ${UN_SETUP}
-                 ssh  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${server}  ${UN_SETUP}
-                 '''
-            }
-        }
-        stage('Update undercloud') {
-            when {
-                expression { !('update-undercloud' in excludelst)  }
-            }
-            steps {
-                echo 'Testing'
-                 sh '''
-                 ir_cli="infrared tripleo-upgrade --undercloud-update yes --overcloud-stack overcloud "
-                 UN_SETUP="cd infrared/;source .venv/bin/activate;$ir_cli"
-                 echo ${UN_SETUP}
-                 ssh  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${server}  ${UN_SETUP}
-                 '''
-            }
-        }
-        stage('Update overcloud repo containers') {
-            when {
-                expression { !('update-overcloud' in excludelst)  }
-            }
-            environment {
-                OS_REL = "${OS_REL}"
-            }
-            steps {
-                echo 'Testing'
-                 sh '''
-                 ir_cli="infrared tripleo-overcloud --ocupdate True  --build ${build_update} --ansible-args='tags=update_collect_info,update_undercloud_validation,update_repos,update_prepare_containers;skip-tags=container-prepare-reboot' --osrelease ${OS_REL} "
-                 if [ ${deployment} = 'virtual' ]
-                 then 
-                  OVER_SETUP="$ir_cli --deployment-files virt "
-                 else
-                  a=`basename $temp_git`
-                  dep_files=${a%.git}/$temp_path
-                  OVER_SETUP="$ir_cli  --deployment-files $dep_files "
-                 fi
-                 OC_SETUP="cd infrared/;source .venv/bin/activate;${OVER_SETUP} "
-                 echo ${OC_SETUP}
-                 ssh  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${server}  ${OC_SETUP}
-                 '''
-            }
-        }
-        stage('Update overcloud') {
-            when {
-                expression { !('update-overcloud' in excludelst)  }
-            }
-            steps {
-                echo 'Testing'
-                 sh '''
-                 ir_cli="infrared tripleo-upgrade  --upgrade-floatingip-check no  --upgrade-workload yes --overcloud-update yes --overcloud-stack overcloud  "
-                 if [ ${deployment} = 'virtual' ]
-                 then 
-                  OVER_SETUP="$ir_cli --deployment-files virt "
-                 else  
-                  a=`basename $temp_git`
-                  dep_files=${a%.git}/$temp_path
-                  OVER_SETUP="$ir_cli  --deployment-files $dep_files "
-                 fi
-                 OC_SETUP="cd infrared/;source .venv/bin/activate;${OVER_SETUP} "
-                 echo ${OC_SETUP}
-                 ssh  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${server}  ${OC_SETUP}
-                 '''
-            }
-        }
-        stage('Post update reboot and check') {
-            when {
-                expression { !('update-overcloud' in excludelst)  }
-            }
-            steps {
-                echo 'Testing'
-                 sh '''
-                 net_back='--network-ovn no --network-ovs yes'
-                 ir_cli="echo -e 'cleanup_services: []' > cleanup_services.yml;infrared tripleo-overcloud --postreboot True --postreboot_evacuate no --overcloud-stack overcloud -e @cleanup_services.yml "
-                 if [ ${deployment} = 'virtual' ]
-                 then
-                  if [ ${release} = '16.1'  ]
-                    then
-                    net_back=' --network-ovn yes '
-                  fi
-                  OVER_SETUP="$ir_cli --deployment-files virt $net_back "
-                 else  
-                  a=`basename $temp_git`
-                  dep_files=${a%.git}/$temp_path
-                  OVER_SETUP="$ir_cli  --deployment-files $dep_files $net_back "
-                 fi
-                 OC_SETUP="cd infrared/;source .venv/bin/activate;${OVER_SETUP} "
-                 echo ${OC_SETUP}
-                 ssh  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${server}  ${OC_SETUP}
-                 '''
-            }
-        }
-        
     }
 }
